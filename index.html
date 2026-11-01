@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Snoodle Pop — a Snood-style bubble popper</title>
+<meta name="description" content="Snoodle Pop: an original, Snood-style bubble shooter. Aim, match 3+, drop the floating clusters, and clear the board before it reaches the danger line. No build step, no downloads — just open and play.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='44' fill='%23ff5d8f'/><circle cx='38' cy='42' r='7' fill='white'/><circle cx='62' cy='42' r='7' fill='white'/><circle cx='38' cy='42' r='3' fill='black'/><circle cx='62' cy='42' r='3' fill='black'/><path d='M35 62 Q50 74 65 62' stroke='black' stroke-width='5' fill='none' stroke-linecap='round'/></svg>">
+</head>
+<body>
+<main class="shell">
+  <header class="top">
+    <div>
+      <h1>🫧 Snoodle Pop</h1>
+      <p class="tag">A Snood-style bubble popper — original art &amp; code, no affiliation with Snood.</p>
+    </div>
+    <div class="scores">
+      <div class="stat"><span>Score</span><strong id="score">0</strong></div>
+      <div class="stat"><span>Best</span><strong id="best">0</strong></div>
+      <div class="stat"><span>Level</span><strong id="level">1</strong></div>
+    </div>
+  </header>
+
+  <div class="hud">
+    <span id="pushLabel">New row in: 6 shots</span>
+    <span id="statusLabel">Aim with your mouse or finger — click / release to shoot.</span>
+    <span class="hud-buttons">
+      <button id="swapBtn" type="button" title="Swap current and next bubble (S)">⇄ Swap</button>
+      <button id="soundBtn" type="button" title="Toggle sound (M)">🔊 Sound</button>
+      <button id="pauseBtn" type="button" title="Pause (P)">⏸ Pause</button>
+      <button id="restartBtn" type="button" title="Restart (R)">↻ Restart</button>
+    </span>
+  </div>
+
+  <div class="board-wrap">
+    <canvas id="game" width="480" height="640" aria-label="Snoodle Pop bubble shooter board"></canvas>
+    <div id="overlay" class="overlay hidden">
+      <div class="card">
+        <h2 id="overlayTitle">Paused</h2>
+        <p id="overlayText"></p>
+        <button id="overlayBtn" type="button">Resume</button>
+        <button id="overlayRestart" type="button" class="secondary">Restart game</button>
+      </div>
+    </div>
+  </div>
+
+  <section class="howto">
+    <h2>How to play</h2>
+    <ul>
+      <li><strong>Aim</strong> with the mouse, arrow keys, or your finger. The dotted line shows the bounce off the side walls.</li>
+      <li><strong>Shoot</strong> by clicking, pressing Space / ↑, or lifting your finger. Match <strong>3 or more</strong> of the same colour to pop them.</li>
+      <li><strong>Drop clusters:</strong> bubbles no longer connected to the top fall for bonus points.</li>
+      <li><strong>Don't let the board cross the red danger line.</strong> Every 6 shots a new row pushes down from the top.</li>
+      <li><strong>Clear the whole board</strong> to advance a level — more rows, more colours.</li>
+      <li><strong>Swap</strong> with the ⇄ button or <kbd>S</kbd> when the next bubble is more useful.</li>
+    </ul>
+    <p class="fine">Inspired by the classic bubble shooter <em>Snood</em> (1996). All characters, colours, sounds and code here are original — this is a fan-style tribute, not Snood itself, and it uses no Snood art, audio or assets.</p>
+  </section>
+
+  <footer class="foot">
+    <span>Static only — HTML, CSS &amp; vanilla JS. Works on GitHub Pages with zero build step.</span>
+    <a href="https://github.com/" target="_blank" rel="noopener">Fork it &amp; make it yours</a>
+  </footer>
+</main>
+<script src="game.js"></script>
+</body>
+</html>
