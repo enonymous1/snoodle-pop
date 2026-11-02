@@ -1,25 +1,48 @@
-// Snoodle Pop — an original Snood-style bubble shooter.
-// Vanilla JS, no dependencies, no assets. All art is drawn on the canvas.
+/**
+ * Snoodle Pop — an original Snood-style bubble shooter.
+ * Vanilla JS, no dependencies, no assets. All art is drawn on the canvas.
+ *
+ * Architecture (today, one IIFE — see REVIEW.md M-1 for the planned split):
+ *   Board model: grid, neighbours(), clusterAt(), dropFloating(), snapToGrid()
+ *   Renderer: draw(), drawBubble(), drawAimPreview() — canvas only.
+ *   Input: pointerAngle(), keydown/mouse/touch listeners.
+ *   Audio/HUD: beep(), updateHud(), setStatus() — WebAudio + textContent only.
+ *   State machine: state in {'playing'|'paused'|'levelClear'|'gameOver'}.
+ * Patched vs baseline (28afa9d) — behaviour-preserving except M-4:
+ *   Named constants + derived board origin, JSDoc, dead-code removal,
+ *   one hitsBubble() helper, one stepEffects() stepper (fixes M-4 pause drift),
+ *   null guard for missing canvas, auto-pause on tab hide, palette names.
+ * NOT changed here (needs tests/screenshots first): module split, sprite
+ * cache (M-3), DPR scaling (L-5), snap-adjacency guard (M-5). See REVIEW.md.
+ */
 (function () {
   'use strict';
 
   var canvas = document.getElementById('game');
-  var ctx = canvas.getContext('2d');
+  var ctx = canvas ? canvas.getContext('2d') : null;
+  if (!canvas || !ctx) { if (typeof console !== 'undefined' && console.error) console.error('Snoodle Pop: canvas #game not found, game not started'); return; }
   var W = 480, H = 640;
   var R = 24, DX = 48, DY = 42;
   var SX = 240, SY = 575;
   var DANGER_Y = 520;
   var PUSH_EVERY = 6;
+  var COLS = 8;
+  var BOARD_X0 = (W - COLS * DX) / 2 + R; // 72, centres the board
+  var BOARD_Y0 = 68; // top margin: room for sky/clouds above row 0
+  var AIM_MAX = 1.35; // radians from vertical, ~77 degrees
+  var FLY_SPEED = 900; // px/s
+  var POP_BASE = 10, POP_BONUS = 10, DROP_POINTS = 20;
+  var LEVEL_BONUS_BASE = 100, LEVEL_BONUS_PER = 50;
 
   // Original blob characters — colour is the identity, face varies by colour.
-  // mouth: 0 smile, 1 grin, 2 open smile, 3 flat, 4 wavy
+  // mouth, as actually drawn: 0 smile, 1 grin, 2 open smile, 3 wavy. No colour uses 4.
   var PALETTE = [
-    { base: '#ef4444', light: '#fca5a5', dark: '#991b1b', mouth: 0 }, // red
-    { base: '#3b82f6', light: '#93c5fd', dark: '#1e40af', mouth: 1 }, // blue
-    { base: '#22c55e', light: '#86efac', dark: '#166534', mouth: 2 }, // green
-    { base: '#eab308', light: '#fde047', dark: '#854d0e', mouth: 0 }, // yellow
-    { base: '#a855f7', light: '#d8b4fe', dark: '#6b21a8', mouth: 1 }, // purple
-    { base: '#f97316', light: '#fdba74', dark: '#9a3412', mouth: 3 }, // orange
+    { name: 'red', base: '#ef4444', light: '#fca5a5', dark: '#991b1b', mouth: 0 }, // red
+    { name: 'blue', base: '#3b82f6', light: '#93c5fd', dark: '#1e40af', mouth: 1 }, // blue
+    { name: 'green', base: '#22c55e', light: '#86efac', dark: '#166534', mouth: 2 }, // green
+    { name: 'yellow', base: '#eab308', light: '#fde047', dark: '#854d0e', mouth: 0 }, // yellow
+    { name: 'purple', base: '#a855f7', light: '#d8b4fe', dark: '#6b21a8', mouth: 1 }, // purple
+    { name: 'orange', base: '#f97316', light: '#fdba74', dark: '#9a3412', mouth: 3 }, // orange
   ];
 
   var scoreEl = document.getElementById('score');
@@ -52,11 +75,13 @@
   function colourCount() { return Math.min(3 + level, PALETTE.length); }
   function rowCount() { return Math.min(4 + level, 8); }
 
-  function cellX(row, col) { return 72 + col * DX + (row % 2 ? DX / 2 : 0); }
-  function cellY(row) { return 68 + row * DY; }
-  function validCell(row, col) {
-    return row >= 0 && row < grid.length && col >= 0 && col < 8 && grid[row][col] !== undefined;
-  }
+  function cellX(row, col) { return BOARD_X0 + col * DX + (row % 2 ? DX / 2 : 0); }
+  function cellY(row) { return BOARD_Y0 + row * DY; }
+  /**
+   * Hex neighbours for odd-r offset coordinates (rows alternate half a
+   * cell). Even rows' upper neighbours shift left, odd rows' shift right —
+   * using one case for both would connect non-adjacent bubbles.
+   */
   function neighbours(row, col) {
     var even = (row % 2 === 0);
     var d = even
@@ -65,13 +90,13 @@
     var out = [], i;
     for (i = 0; i < d.length; i++) {
       var r = row + d[i][0], c = col + d[i][1];
-      if (r >= 0 && r < grid.length && c >= 0 && c < 8) out.push([r, c]);
+      if (r >= 0 && r < grid.length && c >= 0 && c < COLS) out.push([r, c]);
     }
     return out;
   }
   function boardColours() {
     var seen = {}, list = [], r, c;
-    for (r = 0; r < grid.length; r++) for (c = 0; c < 8; c++) {
+    for (r = 0; r < grid.length; r++) for (c = 0; c < COLS; c++) {
       var v = grid[r][c];
       if (v !== null && v !== undefined && !seen[v]) { seen[v] = true; list.push(v); }
     }
@@ -91,7 +116,7 @@
     var rows = rowCount(), r, c;
     for (r = 0; r < rows; r++) {
       var row = [];
-      for (c = 0; c < 8; c++) row.push(randomPaletteColour());
+      for (c = 0; c < COLS; c++) row.push(randomPaletteColour());
       grid.push(row);
     }
     shotsSincePush = 0;
@@ -140,6 +165,11 @@
   function popSound(n) { beep(500 + Math.min(n, 8) * 60, 0.15, 'triangle', 0.16); beep(900, 0.08, 'sine', 0.08); }
 
   // --- drawing a blob ---
+  /**
+   * Draw one blob. Eyes look toward (lookX, lookY); mouth is per-colour data.
+   * Perf note (REVIEW M-3): gradient is rebuilt every call — cache the body
+   * on an offscreen canvas in the renderer split, keep eyes/mouth per-frame.
+   */
   function drawBubble(x, y, ci, scale, lookX, lookY) {
     var p = PALETTE[ci], s = scale || 1, r = R * s;
     var g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r);
@@ -188,6 +218,17 @@
     ctx.stroke(); ctx.setLineDash([]);
   }
 
+  /**
+   * True when point (x, y) overlaps the bubble at (row, col).
+   * The -4 slack is deliberate: bubbles snap into the hex grid with a
+   * 4px tolerance so a fast bubble does not tunnel past a neighbour
+   * between frames. Shared by simulate() and update().
+   */
+  function hitsBubble(x, y, row, col) {
+    var dx = x - cellX(row, col), dy = y - cellY(row);
+    return dx * dx + dy * dy < (2 * R - 4) * (2 * R - 4);
+  }
+
   function simulate() {
     var x = SX, y = SY, vx = Math.sin(aim), vy = -Math.cos(aim), pts = [], i;
     for (i = 0; i < 220; i++) {
@@ -196,10 +237,9 @@
       if (x > W - R) { x = W - R; vx = -vx; }
       if (y <= cellY(0)) break;
       var hit = false, r, c;
-      for (r = 0; r < grid.length && !hit; r++) for (c = 0; c < 8; c++) {
+      for (r = 0; r < grid.length && !hit; r++) for (c = 0; c < COLS; c++) {
         if (grid[r][c] === null || grid[r][c] === undefined) continue;
-        var dx = x - cellX(r, c), dy = y - cellY(r);
-        if (dx * dx + dy * dy < (2 * R - 4) * (2 * R - 4)) { hit = true; break; }
+        if (hitsBubble(x, y, r, c)) { hit = true; break; }
       }
       if (hit) break;
       if (i % 2 === 0) pts.push([x, y]);
@@ -225,7 +265,7 @@
 
     // board bubbles
     var r, c, lookX = Math.sin(aim), lookY = -Math.cos(aim);
-    for (r = 0; r < grid.length; r++) for (c = 0; c < 8; c++) {
+    for (r = 0; r < grid.length; r++) for (c = 0; c < COLS; c++) {
       if (grid[r][c] !== null && grid[r][c] !== undefined) drawBubble(cellX(r, c), cellY(r), grid[r][c], 1, lookX * 0.4, 0);
     }
     // falling bubbles
@@ -254,12 +294,17 @@
     drawBubble(418, SY, next, 0.62, 0, 0);
   }
 
+  /**
+   * Snap a landed bubble to the nearest EMPTY cell, allowing one row beyond
+   * the board. Caveat (REVIEW M-5, not fixed here): no adjacency guard, so
+   * in a sparse board a shot can snap into a hole and then drop as floating.
+   */
   function snapToGrid(x, y) {
     var bestR = 0, bestC = 0, bestD = 1e9, r, c;
     // Allow one row beyond the current board, so a shot landing below
     // the lowest row still snaps to a sensible new row instead of a far slot.
     for (r = 0; r < Math.max(grid.length + 1, 1); r++) {
-      for (c = 0; c < 8; c++) {
+      for (c = 0; c < COLS; c++) {
         if (r < grid.length && grid[r][c] !== null && grid[r][c] !== undefined) continue;
         var dx = x - cellX(r, c), dy = y - cellY(r);
         var d = dx * dx + dy * dy;
@@ -271,8 +316,13 @@
     return [bestR, bestC];
   }
 
+  /**
+   * BFS flood-fill from (row, col) over same-colour bubbles. Iterative
+   * (stack), not recursive, so a large cluster cannot overflow the stack.
+   * Returns the cluster even when < 3 — the caller decides if it pops.
+   */
   function clusterAt(row, col, colour) {
-    var seen = {}, stack = [[row, col]], out = [], key;
+    var seen = {}, stack = [[row, col]], out = [];
     seen[row + ',' + col] = true;
     while (stack.length) {
       var cur = stack.pop(); out.push(cur);
@@ -284,9 +334,14 @@
     return out;
   }
 
+  /**
+   * Drop every bubble not connected to row 0. The ceiling is the only
+   * anchor: a bubble floats iff no occupied-neighbour path leads to row 0.
+   * Dropped bubbles leave the grid immediately and animate via `falling`.
+   */
   function dropFloating() {
     var anchored = {}, stack = [], c;
-    for (c = 0; c < 8; c++) if (grid[0] && grid[0][c] !== null && grid[0][c] !== undefined) stack.push([0, c]);
+    for (c = 0; c < COLS; c++) if (grid[0] && grid[0][c] !== null && grid[0][c] !== undefined) stack.push([0, c]);
     while (stack.length) {
       var cur = stack.pop(), k = cur[0] + ',' + cur[1];
       if (anchored[k]) continue; anchored[k] = true;
@@ -295,7 +350,7 @@
       });
     }
     var dropped = 0, r;
-    for (r = 0; r < grid.length; r++) for (c = 0; c < 8; c++) {
+    for (r = 0; r < grid.length; r++) for (c = 0; c < COLS; c++) {
       if (grid[r][c] !== null && grid[r][c] !== undefined && !anchored[r + ',' + c]) {
         falling.push({ x: cellX(r, c), y: cellY(r), vx: (Math.random() - 0.5) * 60, vy: 0, color: grid[r][c] });
         grid[r][c] = null; dropped++;
@@ -312,6 +367,11 @@
     }
   }
 
+  /**
+   * Resolve one landed shot: pop >=3, drop floating, trim empty bottom rows,
+   * then win (board empty) before lose (danger crossed), then deal next.
+   * Order matters: clearing the last bubble on the danger row wins.
+   */
   function resolveShot(row, col) {
     var colour = grid[row][col];
     var cluster = clusterAt(row, col, colour);
@@ -320,12 +380,12 @@
         burst(cellX(cell[0], cell[1]), cellY(cell[0]), colour, 8);
         grid[cell[0]][cell[1]] = null;
       });
-      var gained = cluster.length * 10 + (cluster.length - 3) * 10;
+      var gained = cluster.length * POP_BASE + (cluster.length - 3) * POP_BONUS;
       score += gained; popSound(cluster.length);
       setStatus('Popped ' + cluster.length + '! +' + gained);
       var dropped = dropFloating();
       if (dropped) {
-        score += dropped * 20;
+        score += dropped * DROP_POINTS;
         setStatus('Popped ' + cluster.length + ' and dropped ' + dropped + ' floating! +' + (gained + dropped * 20));
         beep(700, 0.18, 'triangle', 0.12);
       }
@@ -345,15 +405,20 @@
   function boardEmpty() { return grid.every(function (row) { return row.every(function (v) { return v === null || v === undefined; }); }); }
   function dangerCrossed() {
     var r, c;
-    for (r = 0; r < grid.length; r++) for (c = 0; c < 8; c++) {
+    for (r = 0; r < grid.length; r++) for (c = 0; c < COLS; c++) {
       if (grid[r][c] !== null && grid[r][c] !== undefined && cellY(r) + R > DANGER_Y) return true;
     }
     return false;
   }
 
+  /**
+   * Push a new random row on top (unshift). Side effect: because cellX()
+   * derives offset from row % 2, existing bubbles also shift 24px sideways
+   * — intended, documented in the README, graph rewires to match.
+   */
   function pushRow() {
     var row = [], c;
-    for (c = 0; c < 8; c++) row.push(randomPaletteColour());
+    for (c = 0; c < COLS; c++) row.push(randomPaletteColour());
     grid.unshift(row);
     setStatus('A new row pushed down!');
     beep(220, 0.2, 'sawtooth', 0.08);
@@ -363,7 +428,7 @@
 
   function winLevel() {
     saveBest(); updateHud();
-    var bonus = 100 + level * 50;
+    var bonus = LEVEL_BONUS_BASE + level * LEVEL_BONUS_PER;
     score += bonus; saveBest(); updateHud();
     state = 'levelClear';
     showOverlay('Level ' + level + ' cleared! 🎉', 'Bonus +' + bonus + '. Score: ' + score + '. Ready for level ' + (level + 1) + ' — more rows, more colours.', 'Next level');
@@ -383,8 +448,20 @@
 
   function shoot() {
     if (state !== 'playing' || flying) return;
-    flying = { x: SX, y: SY, vx: Math.sin(aim) * 900, vy: -Math.cos(aim) * 900, color: current };
+    flying = { x: SX, y: SY, vx: Math.sin(aim) * FLY_SPEED, vy: -Math.cos(aim) * FLY_SPEED, color: current };
     beep(400, 0.08, 'square', 0.06);
+  }
+
+  /**
+   * Advance particles and falling bubbles by dt. Used by BOTH the playing
+   * path (via update()) and the paused path (via loop()), so the two can
+   * no longer drift apart — see REVIEW M-4.
+   */
+  function stepEffects(dt) {
+    particles.forEach(function (p) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 240 * dt; p.life -= dt * 1.6; });
+    particles = particles.filter(function (p) { return p.life > 0; });
+    falling.forEach(function (f) { f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 900 * dt; });
+    falling = falling.filter(function (f) { return f.y < H + 40; });
   }
 
   function update(dt) {
@@ -396,10 +473,9 @@
       if (flying.y <= cellY(0)) landed = true;
       if (!landed) {
         var r, c;
-        for (r = 0; r < grid.length && !landed; r++) for (c = 0; c < 8; c++) {
+        for (r = 0; r < grid.length && !landed; r++) for (c = 0; c < COLS; c++) {
           if (grid[r][c] === null || grid[r][c] === undefined) continue;
-          var dx = flying.x - cellX(r, c), dy = flying.y - cellY(r);
-          if (dx * dx + dy * dy < (2 * R - 4) * (2 * R - 4)) landed = true;
+          if (hitsBubble(flying.x, flying.y, r, c)) landed = true;
         }
       }
       if (landed) {
@@ -411,10 +487,7 @@
         resolveShot(cell[0], cell[1]);
       }
     }
-    particles.forEach(function (p) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 240 * dt; p.life -= dt * 1.6; });
-    particles = particles.filter(function (p) { return p.life > 0; });
-    falling.forEach(function (f) { f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 900 * dt; });
-    falling = falling.filter(function (f) { return f.y < H + 40; });
+    stepEffects(dt);
   }
 
   function loop(t) {
@@ -424,11 +497,8 @@
     lastTime = t;
     if (state === 'playing') update(dt);
     else {
-      // still animate particles/falling behind overlays
-      particles.forEach(function (p) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt * 1.6; });
-      particles = particles.filter(function (p) { return p.life > 0; });
-      falling.forEach(function (f) { f.y += f.vy * dt; f.vy += 900 * dt; });
-      falling = falling.filter(function (f) { return f.y < H + 40; });
+      // Still animate behind overlays, with the SAME stepper as playing.
+      stepEffects(dt);
     }
     draw();
   }
@@ -440,7 +510,7 @@
     var my = (clientY - rect.top) * (H / rect.height);
     if (my >= SY - 10) return;
     var a = Math.atan2(mx - SX, SY - my);
-    aim = Math.max(-1.35, Math.min(1.35, a));
+    aim = Math.max(-AIM_MAX, Math.min(AIM_MAX, a));
   }
   canvas.addEventListener('mousemove', function (e) { pointerAngle(e.clientX, e.clientY); });
   canvas.addEventListener('mousedown', function (e) { pointerAngle(e.clientX, e.clientY); shoot(); });
@@ -448,13 +518,17 @@
   canvas.addEventListener('touchend', function (e) { e.preventDefault(); shoot(); }, { passive: false });
 
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'ArrowLeft') aim = Math.max(-1.35, aim - 0.07);
-    if (e.key === 'ArrowRight') aim = Math.min(1.35, aim + 0.07);
+    if (e.key === 'ArrowLeft') aim = Math.max(-AIM_MAX, aim - 0.07);
+    if (e.key === 'ArrowRight') aim = Math.min(AIM_MAX, aim + 0.07);
     if (e.key === ' ' || e.key === 'ArrowUp') { e.preventDefault(); shoot(); }
     if (e.key === 's' || e.key === 'S') swap();
     if (e.key === 'p' || e.key === 'P') togglePause();
     if (e.key === 'r' || e.key === 'R') newGame();
     if (e.key === 'm' || e.key === 'M') toggleSound();
+  });
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden && state === 'playing') togglePause();
   });
 
   function swap() {

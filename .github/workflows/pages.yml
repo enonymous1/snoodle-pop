@@ -15,7 +15,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Staff-review change (H-2): gate the deploy on a syntax + required-files
+  # check. Previously deploy ran with no check at all, so a syntax error or
+  # a renamed element id would ship to Pages and still go green.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Syntax check
+        run: node --check game.js
+      - name: Required files exist
+        run: test -f index.html && test -f style.css && test -f game.js
+
   deploy:
+    needs: check
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

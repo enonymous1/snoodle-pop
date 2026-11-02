@@ -13,6 +13,7 @@ h1 { margin: 0; font-size: 32px; letter-spacing: -0.02em; }
 .hud-buttons { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
 button { cursor: pointer; border: 1px solid #475569; background: #1e293b; color: #f8fafc; border-radius: 999px; padding: 7px 12px; font-size: 13px; }
 button:hover { background: #334155; }
+button:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
 button.secondary { background: transparent; }
 .board-wrap { position: relative; border-radius: 18px; overflow: hidden; border: 2px solid #334155; background: #7dd3fc; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
 canvas { display: block; width: 100%; height: auto; touch-action: none; background: linear-gradient(180deg, #bae6fd 0%, #e0f2fe 55%, #fef9c3 100%); }
